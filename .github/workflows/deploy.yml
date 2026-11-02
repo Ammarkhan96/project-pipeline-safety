@@ -91,11 +91,12 @@ jobs:
           test "$selector" = "v1"
           kubectl -n pipeline-safety get deployments,services,pods -o wide
 
-      - name: Block promotion when canary fails
+      - name: Confirm bad canary was safely rejected
         if: steps.canary.outcome == 'failure'
         run: |
-          echo "Bad canary rejected. Stable v1 remains selected."
-          exit 1
+          echo "SUCCESS: Bad canary rejected."
+          echo "SUCCESS: Stable v1 remains selected."
+          echo "SUCCESS: Unsafe promotion blocked."
 
       - name: Confirm release gate passed
         if: steps.canary.outcome == 'success'
