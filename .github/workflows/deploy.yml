@@ -1,0 +1,102 @@
+name: Pipeline Safety Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-canary:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies and run unit tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          cd app
+          python -m unittest -v
+
+      - name: Build Docker image
+        run: docker build -t pipeline-safety-demo:local app
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Create kind Kubernetes cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: pipeline-safety
+
+      - name: Load Docker image into kind
+        run: kind load docker-image pipeline-safety-demo:local --name pipeline-safety
+
+      - name: Deploy stable and canary releases
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/stable-deployment.yaml
+          kubectl apply -f k8s/canary-deployment.yaml
+          kubectl apply -f k8s/stable-service.yaml
+          kubectl apply -f k8s/canary-service.yaml
+
+          kubectl -n pipeline-safety rollout status deployment/app-v1 --timeout=180s
+          kubectl -n pipeline-safety rollout status deployment/app-v2-canary --timeout=180s
+
+      - name: Verify stable release
+        run: |
+          kubectl -n pipeline-safety run stable-check \
+            --image=curlimages/curl:8.10.1 \
+            --restart=Never --command -- sh -c \
+            'for i in $(seq 1 10); do curl -fsS http://app-stable/health || exit 1; done'
+
+          for i in $(seq 1 60); do
+            phase="$(kubectl -n pipeline-safety get pod stable-check \
+              -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+            [ "$phase" = "Succeeded" ] && break
+            [ "$phase" = "Failed" ] && {
+              kubectl -n pipeline-safety logs stable-check
+              exit 1
+            }
+            sleep 2
+          done
+
+          kubectl -n pipeline-safety logs stable-check
+          kubectl -n pipeline-safety delete pod stable-check --ignore-not-found=true
+
+      - name: Run canary error-rate gate
+        id: canary
+        continue-on-error: true
+        run: ./scripts/verify-canary.sh
+
+      - name: Verify stable v1 was not replaced
+        if: always()
+        run: |
+          selector="$(kubectl -n pipeline-safety get service app-stable \
+            -o jsonpath='{.spec.selector.version}')"
+
+          echo "Stable Service selector: $selector"
+          test "$selector" = "v1"
+          kubectl -n pipeline-safety get deployments,services,pods -o wide
+
+      - name: Block promotion when canary fails
+        if: steps.canary.outcome == 'failure'
+        run: |
+          echo "Bad canary rejected. Stable v1 remains selected."
+          exit 1
+
+      - name: Confirm release gate passed
+        if: steps.canary.outcome == 'success'
+        run: echo "Canary passed the configured error-rate gate."

@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-v1
+  namespace: pipeline-safety
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pipeline-demo
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: pipeline-demo
+        version: v1
+    spec:
+      containers:
+        - name: app
+          image: pipeline-safety-demo:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_VERSION
+              value: "v1"
+            - name: DEGRADED
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi

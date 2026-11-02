@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: pipeline-safety-stable
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - app-stable.pipeline-safety.svc.cluster.local:80
+
+  - job_name: pipeline-safety-canary
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - app-canary.pipeline-safety.svc.cluster.local:80

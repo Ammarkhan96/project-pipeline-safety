@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-v2-canary
+  namespace: pipeline-safety
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipeline-demo
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: pipeline-demo
+        version: v2
+    spec:
+      containers:
+        - name: app
+          image: pipeline-safety-demo:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_VERSION
+              value: "v2"
+            - name: DEGRADED
+              value: "true"
+            - name: FAILURE_RATE
+              value: "0.20"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
